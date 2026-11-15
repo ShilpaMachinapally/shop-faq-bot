@@ -1,23 +1,27 @@
 
 import os
-import smtplib
-import ssl
-from email.message import EmailMessage
+import resend
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from datetime import datetime
 from html import escape
 
-
-from models import db, Shop, PendingQuestion, Conversation, Customer, KnowledgeBase
+from models import (
+    db,
+    Shop,
+    PendingQuestion,
+    Conversation,
+    Customer,
+    KnowledgeBase
+)
 
 owner_bp = Blueprint("owner", __name__)
 
 UNKNOWN_MESSAGE = "Thank you! The shop owner will reply to you soon by email."
 
 
-
+# 1. Owner views pending questions
 @owner_bp.route("/pending-questions/<int:shop_id>")
 @login_required
 def pending_questions(shop_id):
@@ -39,12 +43,16 @@ def pending_questions(shop_id):
 
     for item in pending:
 
-        conversation = db.session.get(Conversation, item.conversation_id)
+        conversation = db.session.get(
+            Conversation, item.conversation_id
+        )
 
         if conversation is None:
             continue
 
-        customer = db.session.get(Customer, conversation.customer_id)
+        customer = db.session.get(
+            Customer, conversation.customer_id
+        )
 
         if customer is None:
             continue
@@ -52,7 +60,9 @@ def pending_questions(shop_id):
         questions.append({
             "pending_id": item.id,
             "question": conversation.question,
-            "customer_name": customer.first_name + " " + customer.last_name,
+            "customer_name": (
+                customer.first_name + " " + customer.last_name
+            ),
             "customer_email": customer.email
         })
 
@@ -102,69 +112,76 @@ def answer_question(pending_id):
     if conversation is None or conversation.shop_id != shop.id:
         return "Conversation not found", 404
 
-    customer = db.session.get(Customer, conversation.customer_id)
+    customer = db.session.get(
+        Customer, conversation.customer_id
+    )
 
     if customer is None or customer.shop_id != shop.id:
         return "Customer not found", 404
 
+    # Save owner's answer
     conversation.ai_answer = answer
 
     pending.owner_answer = answer
     pending.status = "Answered"
     pending.answered_at = datetime.utcnow()
 
+    # Save approved answer to this shop's Knowledge Base
     knowledge = KnowledgeBase(
         shop_id=shop.id,
-        content=f"Question: {conversation.question}\nAnswer: {answer}"
+        content=(
+            f"Question: {conversation.question}\n"
+            f"Answer: {answer}"
+        )
     )
 
     db.session.add(knowledge)
     db.session.commit()
 
-
-    # Send email using Gmail SMTP
+    # 3. Send email using Resend API
     try:
-        gmail_address = os.getenv("GMAIL_ADDRESS")
-        gmail_password = os.getenv("GMAIL_APP_PASSWORD")
 
-        if not gmail_address or not gmail_password:
-            raise ValueError("Gmail settings are missing.")
+        resend_api_key = os.getenv("RESEND_API_KEY")
+        resend_from_email = os.getenv("RESEND_FROM_EMAIL")
 
-        message = EmailMessage()
-        message["Subject"] = f"Answer from {shop.shop_name}"
-        message["From"] = gmail_address
-        message["To"] = customer.email
+        if not resend_api_key or not resend_from_email:
+            raise ValueError("Resend settings are missing.")
 
-        message.set_content(
-            f"Hi {customer.first_name},\n\n"
-            f"Your question: {conversation.question}\n\n"
-            f"Answer: {answer}\n\n"
-            f"Thank you for contacting {shop.shop_name}!"
-        )
+        resend.api_key = resend_api_key
 
-        message.add_alternative(f"""
-            <h2>Hi {escape(customer.first_name)}, your question has been answered!</h2>
-            <p><strong>Your question:</strong></p>
-            <p>{escape(conversation.question)}</p>
-            <p><strong>Answer:</strong></p>
-            <p>{escape(answer)}</p>
-            <p>Thank you for contacting {escape(shop.shop_name)}!</p>
-        """, subtype="html")
+        params = {
+            "from": resend_from_email,
+            "to": [customer.email],
+            "subject": f"Answer from {shop.shop_name}",
+            "text": (
+                f"Hi {customer.first_name},\n\n"
+                f"Your question: {conversation.question}\n\n"
+                f"Answer: {answer}\n\n"
+                f"Thank you for contacting {shop.shop_name}!"
+            ),
+            "html": f"""
+                <h2>Hi {escape(customer.first_name)}, your question has been answered!</h2>
 
-        context = ssl.create_default_context()
+                <p><strong>Your question:</strong></p>
+                <p>{escape(conversation.question)}</p>
 
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            server.login(gmail_address, gmail_password)
-            server.send_message(message)
+                <p><strong>Answer:</strong></p>
+                <p>{escape(answer)}</p>
 
-        print("Gmail email sent successfully.")
+                <p>Thank you for contacting {escape(shop.shop_name)}!</p>
+            """
+        }
+
+        response = resend.Emails.send(params)
+
+        print("Resend email response:", response)
+
         flash("Answer saved and email sent successfully!")
 
     except Exception as e:
-        print("Gmail email error:", repr(e))
+
+        print("Resend email error:", repr(e))
+
         flash("Answer saved, but email could not be sent.")
 
     return redirect(
@@ -172,7 +189,7 @@ def answer_question(pending_id):
     )
 
 
-# 3. Owner Rate Answers page
+# 4. Owner Rate Answers page
 @owner_bp.route("/rate-answers/<int:shop_id>")
 @login_required
 def rate_answers(shop_id):
@@ -199,7 +216,7 @@ def rate_answers(shop_id):
     )
 
 
-# 4. Owner rates an AI answer
+# 5. Owner rates an AI answer
 @owner_bp.route(
     "/owner-rate-answer/<int:conversation_id>",
     methods=["POST"]
@@ -231,11 +248,11 @@ def owner_rate_answer(conversation_id):
         conversation.correct_answer = None
 
         db.session.commit()
+
         flash("Answer marked as Good!")
 
     elif rating == "Bad":
 
-        # Accept both field names for compatibility.
         reason = (
             request.form.get("correction_reason")
             or request.form.get("reason")
@@ -256,7 +273,7 @@ def owner_rate_answer(conversation_id):
         conversation.correction_reason = reason
         conversation.correct_answer = correct_answer
 
-        # Save the owner-approved correction to this shop's KB.
+        # Save correction to this shop's Knowledge Base
         knowledge = KnowledgeBase(
             shop_id=shop.id,
             content=(
@@ -271,6 +288,7 @@ def owner_rate_answer(conversation_id):
         flash("Correction saved to the shop knowledge base!")
 
     else:
+
         flash("Invalid rating!")
 
     return redirect(
