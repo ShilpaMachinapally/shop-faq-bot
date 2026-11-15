@@ -3,27 +3,71 @@
 <html>
 <head>
     <title>Create Shop</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f3eaff;
+            margin: 0;
+            padding: 40px;
+        }
+
+        .container {
+            background: white;
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        input {
+            padding: 10px;
+            width: 90%;
+            margin: 15px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        button {
+            background-color: #7042a5;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #593184;
+        }
+    </style>
 </head>
+
 <body>
 
-    <h2>Create Your Shop</h2>
+    <div class="container">
 
-    <form method="POST">
+        <h2>Create Your Shop</h2>
 
-        <label>Shop Name:</label>
-        <input type="text" name="shop_name" required>
+        <form method="POST">
 
-        <br><br>
+            <label>Shop Name:</label>
+            <input type="text" name="shop_name" required>
 
-        <button type="submit">Create Shop</button>
+            <br><br>
 
-    </form>
+            <button type="submit">Create Shop</button>
 
-    {% with messages = get_flashed_messages() %}
-        {% for message in messages %}
-            <p>{{ message }}</p>
-        {% endfor %}
-    {% endwith %}
+        </form>
+
+        {% with messages = get_flashed_messages() %}
+            {% for message in messages %}
+                <p>{{ message }}</p>
+            {% endfor %}
+        {% endwith %}
+
+    </div>
 
 </body>
 </html>
