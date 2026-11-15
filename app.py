@@ -1,5 +1,5 @@
 from datetime import timedelta
-
+import time
 from flask import Flask, render_template
 from flask_login import LoginManager, login_required
 from config import Config
@@ -39,9 +39,18 @@ def home():
     return render_template("index.html")
 
 
-# Create tables during initial deployment. For future schema changes use migrations.
+# Create tables during initial deployment
 with app.app_context():
+    print("Starting database table check...", flush=True)
+
+    start_time = time.time()
+
     db.create_all()
+
+    print(
+        f"Database tables checked successfully in {time.time() - start_time:.2f} seconds",
+        flush=True
+    )
 
 
 if __name__ == "__main__":
