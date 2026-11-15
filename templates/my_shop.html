@@ -1,0 +1,96 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My Shops</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+    >
+</head>
+
+<body class="bg-light">
+
+<div class="container mt-5">
+
+    <h2>My Shops</h2>
+
+    {% for shop in shops %}
+
+        <div class="card p-3 mb-3">
+
+            <h3>{{ shop.shop_name }}</h3>
+
+            <p>
+                <strong>Shop URL:</strong>
+                <span id="shop-link-{{ shop.id }}">
+                    {{ request.url_root.rstrip('/') }}{{ url_for('customer.customer_register', shop_slug=shop.shop_slug) }}
+                </span>
+            </p>
+
+            <button
+                class="btn btn-secondary mb-2"
+                onclick="copyShopLink('shop-link-{{ shop.id }}')"
+            >
+                Copy Shop Link
+            </button>
+
+            <a
+                href="{{ url_for('knowledge.add_knowledge', shop_id=shop.id) }}"
+                class="btn btn-primary mb-2"
+            >
+                Add Shop Information
+            </a>
+
+            <a
+                href="{{ url_for('owner.pending_questions', shop_id=shop.id) }}"
+                class="btn btn-warning mb-2"
+            >
+                View Pending Questions
+            </a>
+
+            <a
+                href="{{ url_for('owner.rate_answers', shop_id=shop.id) }}"
+                class="btn btn-success mb-2"
+            >
+                Rate Answers
+            </a>
+
+        </div>
+
+    {% else %}
+
+        <p>You haven't created any shops yet.</p>
+
+    {% endfor %}
+
+    <a
+        href="{{ url_for('shop.create_shop') }}"
+        class="btn btn-primary"
+    >
+        Create Another Shop
+    </a>
+
+    <br><br>
+
+    <a href="{{ url_for('auth.logout') }}" class="btn btn-danger">
+        Logout
+    </a>
+
+</div>
+
+<script>
+function copyShopLink(elementId) {
+    const link = document.getElementById(elementId).innerText.trim();
+
+    navigator.clipboard.writeText(link).then(function() {
+        alert("Shop link copied successfully!");
+    }).catch(function() {
+        alert("Unable to copy the link. Please copy it manually.");
+    });
+}
+</script>
+
+</body>
+</html>
