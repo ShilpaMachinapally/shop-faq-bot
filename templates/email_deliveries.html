@@ -1,0 +1,148 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>Email Delivery History</title>
+
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+    >
+</head>
+
+<body class="bg-light">
+
+<div class="container mt-5 mb-5">
+
+    <h2>Email Delivery History - {{ shop.shop_name }}</h2>
+
+    <p class="text-muted">
+        Track customer answer emails and retry failed deliveries.
+    </p>
+
+    {% with messages = get_flashed_messages() %}
+        {% for message in messages %}
+            <div class="alert alert-info">{{ message }}</div>
+        {% endfor %}
+    {% endwith %}
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+
+            {% if deliveries %}
+
+                <div class="table-responsive">
+
+                    <table class="table table-bordered table-hover">
+
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Customer Email</th>
+                                <th>Subject</th>
+                                <th>Status</th>
+                                <th>Attempts</th>
+                                <th>Failure Reason</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+
+                        {% for email in deliveries %}
+
+                            <tr>
+
+                                <td>{{ email.recipient }}</td>
+
+                                <td>{{ email.subject }}</td>
+
+                                <td>
+                                    {% if email.status == "Sent" %}
+                                        <span class="badge bg-success">
+                                            Sent
+                                        </span>
+                                    {% elif email.status == "Failed" %}
+                                        <span class="badge bg-danger">
+                                            Failed
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-warning text-dark">
+                                            Pending
+                                        </span>
+                                    {% endif %}
+                                </td>
+
+                                <td>{{ email.attempts }}</td>
+
+                                <td>
+                                    {% if email.last_error %}
+                                        {{ email.last_error }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {% if email.status == "Sent" %}
+
+                                        <span class="text-success">
+                                            Completed
+                                        </span>
+
+                                    {% else %}
+
+                                        <form
+                                            method="POST"
+                                            action="{{ url_for(
+                                                'owner.retry_email',
+                                                delivery_id=email.id
+                                            ) }}"
+                                        >
+
+                                            <button
+                                                type="submit"
+                                                class="btn btn-sm btn-danger"
+                                            >
+                                                Retry Email
+                                            </button>
+
+                                        </form>
+
+                                    {% endif %}
+                                </td>
+
+                            </tr>
+
+                        {% endfor %}
+
+                        </tbody>
+
+                    </table>
+
+                </div>
+
+            {% else %}
+
+                <div class="alert alert-info">
+                    No email delivery records found.
+                </div>
+
+            {% endif %}
+
+        </div>
+    </div>
+
+    <a
+        href="{{ url_for('shop.my_shop') }}"
+        class="btn btn-secondary mt-4"
+    >
+        Back to My Shops
+    </a>
+
+</div>
+
+</body>
+</html>

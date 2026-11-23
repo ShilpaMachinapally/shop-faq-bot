@@ -45,7 +45,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 
 
-def get_claude_answer(question, shop_information, corrections=None):
+def get_gemini_answer(question, shop_information, corrections=None):
 
     """Generate an answer with Gemini using only this shop's knowledge."""
 
@@ -595,7 +595,7 @@ def chat(shop_slug):
 
             if answer is None:
 
-                answer = get_claude_answer(
+                answer = get_gemini_answer(
 
                     question,
 
@@ -716,93 +716,14 @@ def chat(shop_slug):
 
 
 @customer_bp.route("/rate-answer/<int:conversation_id>", methods=["POST"])
-
 def rate_answer(conversation_id):
-
-    customer_id = session.get("customer_id")
-
-    shop_id = session.get("shop_id")
-
-    shop_slug = session.get("shop_slug")
-
-
-
-    if not customer_id or not shop_id or not shop_slug:
-
-        return "Please register again.", 401
-
-
-
-    conversation = Conversation.query.filter_by(
-
-        id=conversation_id,
-
-        customer_id=customer_id,
-
-        shop_id=shop_id
-
-    ).first()
-
-    if conversation is None:
-
-        return "Conversation not found.", 404
-
-
-
-    rating = request.form.get("rating", "").strip()
-
-    if rating not in ("Good", "Bad"):
-
-        return "Invalid rating.", 400
-
-
-
-    conversation.rating = rating
-
-
-
-    if rating == "Bad":
-
-        reason = request.form.get("reason", "").strip()
-
-        correct_answer = request.form.get("correct_answer", "").strip()
-
-
-
-        if not reason or not correct_answer:
-
-            flash("Please provide the reason and the correct answer.")
-
-            return redirect(url_for("customer.chat", shop_slug=shop_slug))
-
-
-
-        conversation.correction_reason = reason
-
-        conversation.correct_answer = correct_answer
-
-
-
-        knowledge = KnowledgeBase(
-
-            shop_id=shop_id,
-
-            content=(
-
-                f"Question: {conversation.question}\n"
-
-                f"Answer: {correct_answer}"
-
-            )
-
-        )
-
-        db.session.add(knowledge)
-
-
-
-    db.session.commit()
-
-    flash("Thank you for your feedback.")
-
-    return redirect(url_for("customer.chat", shop_slug=shop_slug))
+    """
+    Customers are not allowed to rate answers or modify
+    the shop knowledge base.
+    Only shop owners can submit corrections.
+    """
+    return (
+        "Only the shop owner can rate answers or submit "
+        "knowledge-base corrections.",
+        403
+    )

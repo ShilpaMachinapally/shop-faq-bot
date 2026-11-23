@@ -1,7 +1,4 @@
 
-import os
-import resend
-
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from datetime import datetime
@@ -13,8 +10,10 @@ from models import (
     PendingQuestion,
     Conversation,
     Customer,
-    KnowledgeBase
+    KnowledgeBase,
+    EmailDelivery
 )
+from email_service import send_answer_email
 
 owner_bp = Blueprint("owner", __name__)
 
@@ -47,14 +46,14 @@ def pending_questions(shop_id):
             Conversation, item.conversation_id
         )
 
-        if conversation is None:
+        if conversation is None or conversation.shop_id != shop.id:
             continue
 
         customer = db.session.get(
             Customer, conversation.customer_id
         )
 
-        if customer is None:
+        if customer is None or customer.shop_id != shop.id:
             continue
 
         questions.append({
@@ -119,14 +118,13 @@ def answer_question(pending_id):
     if customer is None or customer.shop_id != shop.id:
         return "Customer not found", 404
 
-    # Save owner's answer
+    # Save owner's answer.
     conversation.ai_answer = answer
-
     pending.owner_answer = answer
     pending.status = "Answered"
     pending.answered_at = datetime.utcnow()
 
-    # Save approved answer to this shop's Knowledge Base
+    # Save approved answer to this shop's Knowledge Base.
     knowledge = KnowledgeBase(
         shop_id=shop.id,
         content=(
@@ -136,60 +134,124 @@ def answer_question(pending_id):
     )
 
     db.session.add(knowledge)
+
+    # Create a persistent email record BEFORE attempting delivery.
+    email_text = (
+        f"Hi {customer.first_name},\n\n"
+        f"Your question: {conversation.question}\n\n"
+        f"Answer: {answer}\n\n"
+        f"Thank you for contacting {shop.shop_name}!"
+    )
+
+    email_html = f"""
+        <h2>Hi {escape(customer.first_name)}, your question has been answered!</h2>
+        <p><strong>Your question:</strong></p>
+        <p>{escape(conversation.question)}</p>
+        <p><strong>Answer:</strong></p>
+        <p>{escape(answer)}</p>
+        <p>Thank you for contacting {escape(shop.shop_name)}!</p>
+    """
+
+    delivery = EmailDelivery(
+        shop_id=shop.id,
+        pending_question_id=pending.id,
+        conversation_id=conversation.id,
+        recipient=customer.email,
+        subject=f"Answer from {shop.shop_name}",
+        text_body=email_text,
+        html_body=email_html,
+        status="Pending",
+        attempts=0
+    )
+
+    db.session.add(delivery)
     db.session.commit()
 
-    # 3. Send email using Resend API
-    try:
+    # Attempt real email delivery.
+    success = send_answer_email(delivery)
 
-        resend_api_key = os.getenv("RESEND_API_KEY")
-        resend_from_email = os.getenv("RESEND_FROM_EMAIL")
-
-        if not resend_api_key or not resend_from_email:
-            raise ValueError("Resend settings are missing.")
-
-        resend.api_key = resend_api_key
-
-        params = {
-            "from": resend_from_email,
-            "to": [customer.email],
-            "subject": f"Answer from {shop.shop_name}",
-            "text": (
-                f"Hi {customer.first_name},\n\n"
-                f"Your question: {conversation.question}\n\n"
-                f"Answer: {answer}\n\n"
-                f"Thank you for contacting {shop.shop_name}!"
-            ),
-            "html": f"""
-                <h2>Hi {escape(customer.first_name)}, your question has been answered!</h2>
-
-                <p><strong>Your question:</strong></p>
-                <p>{escape(conversation.question)}</p>
-
-                <p><strong>Answer:</strong></p>
-                <p>{escape(answer)}</p>
-
-                <p>Thank you for contacting {escape(shop.shop_name)}!</p>
-            """
-        }
-
-        response = resend.Emails.send(params)
-
-        print("Resend email response:", response)
-
-        flash("Answer saved and email sent successfully!")
-
-    except Exception as e:
-
-        print("Resend email error:", repr(e))
-
-        flash("Answer saved, but email could not be sent.")
+    if success:
+        flash("Answer saved and email sent to the customer.")
+    else:
+        flash(
+            "Answer saved, but email delivery failed after automatic "
+            "retries. The failure was recorded and you can retry it "
+            "from the email delivery page."
+        )
 
     return redirect(
-        url_for("owner.pending_questions", shop_id=shop.id)
+        url_for("owner.email_deliveries", shop_id=shop.id)
     )
 
 
-# 4. Owner Rate Answers page
+# 3. Owner views email delivery history
+@owner_bp.route("/email-deliveries/<int:shop_id>")
+@login_required
+def email_deliveries(shop_id):
+
+    shop = Shop.query.filter_by(
+        id=shop_id,
+        owner_id=current_user.id
+    ).first()
+
+    if shop is None:
+        return "Shop not found", 404
+
+    deliveries = EmailDelivery.query.filter_by(
+        shop_id=shop.id
+    ).order_by(
+        EmailDelivery.id.desc()
+    ).all()
+
+    return render_template(
+        "email_deliveries.html",
+        shop=shop,
+        deliveries=deliveries
+    )
+
+
+# 4. Owner retries a failed email
+@owner_bp.route(
+    "/retry-email/<int:delivery_id>",
+    methods=["POST"]
+)
+@login_required
+def retry_email(delivery_id):
+
+    delivery = EmailDelivery.query.filter_by(
+        id=delivery_id
+    ).first()
+
+    if delivery is None:
+        return "Email record not found", 404
+
+    shop = Shop.query.filter_by(
+        id=delivery.shop_id,
+        owner_id=current_user.id
+    ).first()
+
+    if shop is None:
+        return "Unauthorized", 403
+
+    if delivery.status == "Sent":
+        flash("This email was already sent.")
+        return redirect(
+            url_for("owner.email_deliveries", shop_id=shop.id)
+        )
+
+    success = send_answer_email(delivery)
+
+    if success:
+        flash("Email retry sent to the customer.")
+    else:
+        flash("Email retry failed. The failure has been recorded.")
+
+    return redirect(
+        url_for("owner.email_deliveries", shop_id=shop.id)
+    )
+
+
+# 5. Owner Rate Answers page
 @owner_bp.route("/rate-answers/<int:shop_id>")
 @login_required
 def rate_answers(shop_id):
@@ -216,7 +278,7 @@ def rate_answers(shop_id):
     )
 
 
-# 5. Owner rates an AI answer
+# 6. Owner rates an AI answer
 @owner_bp.route(
     "/owner-rate-answer/<int:conversation_id>",
     methods=["POST"]
@@ -273,7 +335,7 @@ def owner_rate_answer(conversation_id):
         conversation.correction_reason = reason
         conversation.correct_answer = correct_answer
 
-        # Save correction to this shop's Knowledge Base
+        # Existing knowledge-base behavior is retained here.
         knowledge = KnowledgeBase(
             shop_id=shop.id,
             content=(
