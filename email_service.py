@@ -1,4 +1,5 @@
 import os
+import re
 import smtplib
 import time
 
@@ -11,7 +12,31 @@ import resend
 from models import db, EmailDelivery
 
 
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+MAX_AUTOMATIC_ATTEMPTS = 3
+
+
+def _validate_recipient(delivery):
+    recipient = (delivery.recipient or "").strip()
+
+    if not EMAIL_PATTERN.fullmatch(recipient):
+        raise ValueError("Customer email address is missing or invalid.")
+
+    return recipient
+
+
+def _forced_failure_enabled():
+    return (
+        os.getenv("EMAIL_FORCE_FAILURE", "false")
+        .strip()
+        .lower()
+        == "true"
+    )
+
+
 def _send_via_gmail(delivery):
+    recipient = _validate_recipient(delivery)
+
     address = os.getenv("GMAIL_ADDRESS")
     app_password = os.getenv("GMAIL_APP_PASSWORD")
 
@@ -22,7 +47,7 @@ def _send_via_gmail(delivery):
 
     message = EmailMessage()
     message["From"] = address
-    message["To"] = delivery.recipient
+    message["To"] = recipient
     message["Subject"] = delivery.subject
     message["Date"] = formatdate(localtime=True)
     message_id = make_msgid(domain="shop-faq-bot")
@@ -38,6 +63,19 @@ def _send_via_gmail(delivery):
 
 
 def _send_via_resend(delivery):
+    recipient = _validate_recipient(delivery)
+
+    test_mode = (
+        os.getenv("RESEND_TEST_MODE", "true").strip().lower() == "true"
+    )
+
+    if test_mode:
+        raise RuntimeError(
+            "Resend test mode is enabled: messages go to "
+            "delivered@resend.dev, not to the customer. Set "
+            "RESEND_TEST_MODE=false and verify the sender before retrying."
+        )
+
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM_EMAIL")
 
@@ -48,11 +86,6 @@ def _send_via_resend(delivery):
         raise ValueError("RESEND_FROM_EMAIL is missing.")
 
     resend.api_key = api_key
-
-    test_mode = (
-        os.getenv("RESEND_TEST_MODE", "true").lower() == "true"
-    )
-    recipient = "delivered@resend.dev" if test_mode else delivery.recipient
 
     params = {
         "from": from_email,
@@ -78,7 +111,7 @@ def _send_via_resend(delivery):
 
 
 def _provider_send(delivery):
-    provider = os.getenv("EMAIL_PROVIDER", "resend").strip().lower()
+    provider = os.getenv("EMAIL_PROVIDER", "gmail").strip().lower()
 
     if provider == "gmail":
         return _send_via_gmail(delivery)
@@ -92,46 +125,82 @@ def _provider_send(delivery):
 def send_answer_email(delivery):
     """Send a saved email, persist every failure, and retry automatically."""
 
-    max_attempts = max(1, int(os.getenv("EMAIL_MAX_ATTEMPTS", "3")))
-    backoff_seconds = float(os.getenv("EMAIL_RETRY_BACKOFF_SECONDS", "2"))
+    if delivery.status == "Sent":
+        return False
+
+    try:
+        configured_attempts = int(
+            os.getenv("EMAIL_MAX_ATTEMPTS", str(MAX_AUTOMATIC_ATTEMPTS))
+        )
+    except (TypeError, ValueError):
+        configured_attempts = MAX_AUTOMATIC_ATTEMPTS
+
+    max_attempts = max(
+        1, min(MAX_AUTOMATIC_ATTEMPTS, configured_attempts)
+    )
+
+    try:
+        backoff_seconds = float(
+            os.getenv("EMAIL_RETRY_BACKOFF_SECONDS", "2")
+        )
+    except (TypeError, ValueError):
+        backoff_seconds = 2.0
+
+    backoff_seconds = max(0.0, backoff_seconds)
 
     for attempt_number in range(1, max_attempts + 1):
 
-        delivery.attempts += 1
-        delivery.status = "Pending"
-        delivery.updated_at = datetime.utcnow()
+        current = db.session.get(EmailDelivery, delivery.id)
+
+        if current is None:
+            return False
+
+        if current.status == "Sent":
+            return False
+
+        current.attempts += 1
+        current.status = "Pending"
+        current.updated_at = datetime.utcnow()
         db.session.commit()
 
         try:
-            provider_id = _provider_send(delivery)
+            _validate_recipient(current)
 
-            delivery.provider_email_id = str(provider_id)
-            delivery.status = "Sent"
-            delivery.sent_at = datetime.utcnow()
-            delivery.last_error = None
-            delivery.updated_at = datetime.utcnow()
+            if _forced_failure_enabled():
+                raise RuntimeError(
+                    "EMAIL_FORCE_FAILURE=true: intentional email failure "
+                    "for testing."
+                )
+
+            provider_id = _provider_send(current)
+
+            current.provider_email_id = str(provider_id)
+            current.status = "Sent"
+            current.sent_at = datetime.utcnow()
+            current.last_error = None
+            current.updated_at = datetime.utcnow()
             db.session.commit()
             return True
 
         except Exception as error:
             db.session.rollback()
-            delivery = db.session.get(EmailDelivery, delivery.id)
+            current = db.session.get(EmailDelivery, delivery.id)
 
-            if delivery is None:
+            if current is None:
                 return False
 
-            delivery.last_error = str(error)
-            delivery.updated_at = datetime.utcnow()
+            current.last_error = f"{type(error).__name__}: {error}"
+            current.updated_at = datetime.utcnow()
 
             if attempt_number < max_attempts:
-                delivery.status = "Pending"
+                current.status = "Pending"
             else:
-                delivery.status = "Failed"
+                current.status = "Failed"
 
             db.session.commit()
 
             print(
-                f"Email attempt {delivery.attempts} failed: {error}",
+                f"Email attempt {current.attempts} failed: {error}",
                 flush=True
             )
 

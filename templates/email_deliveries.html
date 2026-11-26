@@ -23,6 +23,11 @@
         Track customer answer emails and retry failed deliveries.
     </p>
 
+    <p class="text-muted small">
+        "Sent" means the email provider accepted the message; it does not
+        confirm delivery to the customer's inbox.
+    </p>
+
     {% with messages = get_flashed_messages() %}
         {% for message in messages %}
             <div class="alert alert-info">{{ message }}</div>
@@ -62,7 +67,7 @@
                                 <td>
                                     {% if email.status == "Sent" %}
                                         <span class="badge bg-success">
-                                            Sent
+                                            Sent (provider accepted)
                                         </span>
                                     {% elif email.status == "Failed" %}
                                         <span class="badge bg-danger">
@@ -86,13 +91,7 @@
                                 </td>
 
                                 <td>
-                                    {% if email.status == "Sent" %}
-
-                                        <span class="text-success">
-                                            Completed
-                                        </span>
-
-                                    {% else %}
+                                    {% if email.status == "Failed" %}
 
                                         <form
                                             method="POST"
@@ -110,6 +109,18 @@
                                             </button>
 
                                         </form>
+
+                                    {% elif email.status == "Sent" %}
+
+                                        <span class="text-success">
+                                            Provider accepted
+                                        </span>
+
+                                    {% else %}
+
+                                        <span class="text-muted">
+                                            Not sent
+                                        </span>
 
                                     {% endif %}
                                 </td>

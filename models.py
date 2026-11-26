@@ -1,5 +1,6 @@
 
 
+import re
 from datetime import datetime
 
 from flask_sqlalchemy import SQLAlchemy
@@ -33,6 +34,41 @@ class KnowledgeBase(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     shop_id = db.Column(db.Integer, db.ForeignKey("shops.id"), nullable=False)
     content = db.Column(db.Text, nullable=False)
+
+    @staticmethod
+    def normalize_content(content):
+        if not content:
+            return ""
+
+        lines = []
+        for line in content.splitlines():
+            line = re.sub(r"\s+", " ", line).strip()
+            line = re.sub(
+                r"^(?:q|question)\s*[:.]\s*", "Question: ", line,
+                flags=re.IGNORECASE
+            )
+            line = re.sub(
+                r"^(?:a|answer)\s*[:.]\s*", "Answer: ", line,
+                flags=re.IGNORECASE
+            )
+            if line:
+                lines.append(line)
+
+        return "\n".join(lines).casefold()
+
+    @classmethod
+    def add_if_missing(cls, shop_id, content):
+        normalized = cls.normalize_content(content)
+        if not normalized:
+            return None
+
+        for entry in cls.query.filter_by(shop_id=shop_id).all():
+            if cls.normalize_content(entry.content) == normalized:
+                return None
+
+        knowledge = cls(shop_id=shop_id, content=content)
+        db.session.add(knowledge)
+        return knowledge
 
 
 class Customer(db.Model):

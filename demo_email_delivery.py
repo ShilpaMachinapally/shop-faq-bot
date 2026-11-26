@@ -31,6 +31,7 @@ from routes.owner import owner_bp
 
 DEMO_INBOX = os.getenv("GMAIL_ADDRESS")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+DEMO_CUSTOMER_PASSWORD = "demo-customer-password-123"
 
 if not DEMO_INBOX or not GMAIL_APP_PASSWORD:
     raise SystemExit("GMAIL_ADDRESS / GMAIL_APP_PASSWORD must be set in .env")
@@ -91,6 +92,8 @@ def customer_asks(shop, question):
             "first_name": "Demo",
             "last_name": "Customer",
             "email": DEMO_INBOX,
+            "password": DEMO_CUSTOMER_PASSWORD,
+            "confirm_password": DEMO_CUSTOMER_PASSWORD,
         },
         follow_redirects=True,
     )

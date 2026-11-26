@@ -1,7 +1,8 @@
 from datetime import timedelta
 import time
-from flask import Flask, render_template
-from flask_login import LoginManager, login_required
+from flask import Flask, redirect, render_template, request, url_for
+from flask_login import LoginManager, current_user
+
 from config import Config
 from models import db, Owner
 from routes.authentication import auth_bp
@@ -33,11 +34,13 @@ app.register_blueprint(customer_bp)
 app.register_blueprint(owner_bp)
 
 
-@app.route("/")
-@login_required
-def home():
-    return render_template("index.html")
 
+@app.route("/")
+def home():
+    if not current_user.is_authenticated or request.args.get("welcome") != "1":
+        return redirect(url_for("auth.login"))
+
+    return render_template("index.html")
 
 # Create tables during initial deployment
 with app.app_context():

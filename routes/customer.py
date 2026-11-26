@@ -1,4 +1,5 @@
 from flask import Blueprint, render_template, request, redirect, url_for, session, flash
+from sqlalchemy import func
 
 import os
 
@@ -42,6 +43,52 @@ customer_bp = Blueprint("customer", __name__)
 UNKNOWN_MESSAGE = "Thank you! The shop owner will reply to you soon by email."
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
+
+
+def _clear_customer_session():
+
+    for key in ("customer_id", "shop_id", "shop_slug"):
+
+        session.pop(key, None)
+
+
+
+def _current_customer(shop):
+
+    customer_id = session.get("customer_id")
+
+    if (
+
+        not customer_id
+
+        or session.get("shop_id") != shop.id
+
+        or session.get("shop_slug") != shop.shop_slug
+
+    ):
+
+        return None
+
+    return Customer.query.filter_by(
+
+        id=customer_id, shop_id=shop.id
+
+    ).first()
+
+
+
+def _login_customer(customer, shop):
+
+    _clear_customer_session()
+
+    session.permanent = True
+
+    session["customer_id"] = customer.id
+
+    session["shop_id"] = shop.id
+
+    session["shop_slug"] = shop.shop_slug
 
 
 
@@ -317,31 +364,8 @@ def customer_register(shop_slug):
 
 
 
-    existing_customer_id = session.get("customer_id")
-
-    if (
-
-        request.method == "GET"
-
-        and session.get("shop_id") == shop.id
-
-        and session.get("shop_slug") == shop.shop_slug
-
-        and existing_customer_id
-
-    ):
-
-        existing_customer = Customer.query.filter_by(
-
-            id=existing_customer_id, shop_id=shop.id
-
-        ).first()
-
-        if existing_customer:
-
-            return redirect(url_for("customer.chat", shop_slug=shop.shop_slug))
-
-
+    if _current_customer(shop):
+        return redirect(url_for("customer.chat", shop_slug=shop.shop_slug))
 
     if request.method == "POST":
 
@@ -351,8 +375,6 @@ def customer_register(shop_slug):
 
         email = request.form.get("email", "").strip().lower()
 
-
-
         if not first_name or not last_name or not email:
 
             flash("Please fill in all fields.")
@@ -361,35 +383,61 @@ def customer_register(shop_slug):
 
 
 
-        customer = Customer(
+        customers = Customer.query.filter(
 
-            shop_id=shop.id,
+            Customer.shop_id == shop.id,
 
-            first_name=first_name,
+            func.lower(Customer.email) == email
 
-            last_name=last_name,
+        ).all()
 
-            email=email
+
+
+        customer = next(
+
+            (
+
+                existing for existing in customers
+
+                if existing.first_name.casefold() == first_name.casefold()
+
+                and existing.last_name.casefold() == last_name.casefold()
+
+            ),
+
+            None
 
         )
 
-        db.session.add(customer)
-
-        db.session.commit()
 
 
+        if customer is None:
 
-        session.clear()
+            customer = Customer(
 
-        session.permanent = True
+                shop_id=shop.id,
 
-        session["customer_id"] = customer.id
+                first_name=first_name,
 
-        session["shop_id"] = shop.id
+                last_name=last_name,
 
-        session["shop_slug"] = shop.shop_slug
+                email=email
+
+            )
+
+            db.session.add(customer)
+
+            db.session.commit()
+
+            flash("Customer account created.")
+
+        else:
+
+            flash("Welcome back!")
 
 
+
+        _login_customer(customer, shop)
 
         return redirect(url_for("customer.chat", shop_slug=shop.shop_slug))
 
@@ -415,16 +463,6 @@ def legacy_customer_link(shop_slug):
 
 
 
-
-
-
-
-
-
-
-
-
-
 @customer_bp.route("/chat/<shop_slug>", methods=["GET", "POST"])
 
 def chat(shop_slug):
@@ -439,41 +477,13 @@ def chat(shop_slug):
 
 
 
-    customer_id = session.get("customer_id")
-
-
-
-    if (
-
-        not customer_id
-
-        or session.get("shop_id") != shop.id
-
-        or session.get("shop_slug") != shop.shop_slug
-
-    ):
-
-        return redirect(
-
-            url_for("customer.customer_register", shop_slug=shop_slug)
-
-        )
-
-
-
-    customer = Customer.query.filter_by(
-
-        id=customer_id,
-
-        shop_id=shop.id
-
-    ).first()
+    customer = _current_customer(shop)
 
 
 
     if customer is None:
 
-        session.clear()
+        _clear_customer_session()
 
         return redirect(
 

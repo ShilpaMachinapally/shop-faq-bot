@@ -23,14 +23,14 @@ def add_knowledge(shop_id):
 
         content = request.form.get("content")
 
-        if content:
+        if content and content.strip():
 
-            knowledge = KnowledgeBase(
-                shop_id=shop.id,
-                content=content
-            )
+            if KnowledgeBase.add_if_missing(shop.id, content) is None:
+                flash("This information is already in the knowledge base!")
+                return redirect(
+                    url_for("knowledge.add_knowledge", shop_id=shop.id)
+                )
 
-            db.session.add(knowledge)
             db.session.commit()
 
             flash("Information saved successfully!")

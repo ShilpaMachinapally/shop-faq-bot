@@ -125,15 +125,10 @@ def answer_question(pending_id):
     pending.answered_at = datetime.utcnow()
 
     # Save approved answer to this shop's Knowledge Base.
-    knowledge = KnowledgeBase(
-        shop_id=shop.id,
-        content=(
-            f"Question: {conversation.question}\n"
-            f"Answer: {answer}"
-        )
+    KnowledgeBase.add_if_missing(
+        shop.id,
+        f"Question: {conversation.question}\nAnswer: {answer}"
     )
-
-    db.session.add(knowledge)
 
     # Create a persistent email record BEFORE attempting delivery.
     email_text = (
@@ -171,7 +166,10 @@ def answer_question(pending_id):
     success = send_answer_email(delivery)
 
     if success:
-        flash("Answer saved and email sent to the customer.")
+        flash(
+            "Answer saved. The email provider accepted the message; "
+            "delivery to the customer's inbox is not guaranteed."
+        )
     else:
         flash(
             "Answer saved, but email delivery failed after automatic "
@@ -233,8 +231,8 @@ def retry_email(delivery_id):
     if shop is None:
         return "Unauthorized", 403
 
-    if delivery.status == "Sent":
-        flash("This email was already sent.")
+    if delivery.status != "Failed":
+        flash("Only failed emails can be retried.")
         return redirect(
             url_for("owner.email_deliveries", shop_id=shop.id)
         )
@@ -242,7 +240,10 @@ def retry_email(delivery_id):
     success = send_answer_email(delivery)
 
     if success:
-        flash("Email retry sent to the customer.")
+        flash(
+            "Email retry was accepted by the provider; delivery to the "
+            "customer's inbox is not guaranteed."
+        )
     else:
         flash("Email retry failed. The failure has been recorded.")
 
@@ -335,16 +336,10 @@ def owner_rate_answer(conversation_id):
         conversation.correction_reason = reason
         conversation.correct_answer = correct_answer
 
-        # Existing knowledge-base behavior is retained here.
-        knowledge = KnowledgeBase(
-            shop_id=shop.id,
-            content=(
-                f"Question: {conversation.question}\n"
-                f"Answer: {correct_answer}"
-            )
+        KnowledgeBase.add_if_missing(
+            shop.id,
+            f"Question: {conversation.question}\nAnswer: {correct_answer}"
         )
-
-        db.session.add(knowledge)
         db.session.commit()
 
         flash("Correction saved to the shop knowledge base!")
